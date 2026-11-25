@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Toy Town</title>
+<style>
+  :root { --bg: #0f141c; --ink: #e9eef5; --muted: #8b97a8; --line: #263142; --accent: #ff3fa9; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; }
+  main { max-width: 1312px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  h1 { font-size: 20px; margin: 0; }
+  h1 span { color: var(--muted); font-weight: 400; font-size: 15px; }
+  #stage { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #2a2440; }
+  canvas { width: 100%; height: 100%; display: block; outline: none; }
+  #play { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(15, 20, 28, 0.55);
+    font-size: 20px; font-weight: 700; cursor: pointer; letter-spacing: 0.04em; }
+  #play span { padding: 12px 26px; border-radius: 999px; background: var(--accent); }
+  #stage.playing #play { display: none; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 24px; color: var(--muted); }
+  .controls b { color: var(--ink); font-weight: 600; display: block; margin-bottom: 2px; }
+  kbd { font: 12px ui-monospace, monospace; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--ink); }
+  #status { font: 12px ui-monospace, monospace; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Toy Town <span>a 32 cm toy truck in a full-size street</span></h1>
+  <div id="stage">
+    <canvas id="rive" width="1280" height="720" tabindex="0"></canvas>
+    <div id="play"><span>Click to play</span></div>
+  </div>
+  <div class="controls">
+    <div><b>Keyboard</b><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive or walk &middot; <kbd>Space</kbd> handbrake / jump &middot;
+      <kbd>Shift</kbd> run &middot; <kbd>E</kbd> get out / take any car &middot; <kbd>R</kbd> unstuck &middot; <kbd>Esc</kbd> pause menu</div>
+    <div><b>Mouse</b>move to look around (it swings back after a moment); click the menus</div>
+    <div><b>Xbox controller</b>RT / LT gas and brake &middot; left stick steer or walk &middot; A handbrake / jump &middot;
+      Y get in / out &middot; B unstuck &middot; right stick look &middot; Menu pause</div>
+  </div>
+  <p id="status">loading…</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@rive-app/webgl2@2.55.1/rive.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const canvas = $('rive');
+const stage = $('stage');
+
+// The game takes keys itself once the canvas has focus; a click also lets the browser start the sound.
+function play() { canvas.focus(); stage.classList.add('playing'); }
+$('play').addEventListener('click', play);
+canvas.addEventListener('blur', () => stage.classList.remove('playing'));
+canvas.addEventListener('focus', () => stage.classList.add('playing'));
+canvas.addEventListener('keydown', (e) => {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+
+const r = new rive.Rive({
+  src: 'toytown.riv?v=1',
+  canvas,
+  artboard: 'Main',
+  stateMachine: 'Main',
+  autoplay: true,
+  autoBind: true,
+  enableGPUCanvas: true,   // the 3D town is drawn on the GPU canvas (Rive's own share links don't turn it on)
+  layout: new rive.Layout({ fit: rive.Fit.Contain }),
+  onLoad: () => {
+    r.resizeDrawingSurfaceToCanvas();
+    $('status').textContent = 'Made with Rive (scripts, shaders) · best in a desktop browser';
+  },
+  onLoadError: (e) => { $('status').textContent = 'Could not load the game: ' + e; },
+});
+window.addEventListener('resize', () => r.resizeDrawingSurfaceToCanvas());
+window.rivePlayer = r;
+</script>
+</body>
+</html>
