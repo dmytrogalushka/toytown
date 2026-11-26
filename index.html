@@ -112,6 +112,7 @@ function createPlayer(ver) {
       loaded = true;
       fit();
       setTouch(touchMode);
+      radioSetup();
       $('play').disabled = false;
       $('play').textContent = touchMode ? 'Tap to play' : 'Click to play';
     },
@@ -163,8 +164,104 @@ function goFullscreen() {
       .catch(() => {}).finally(queueFit);
   } catch (e) {}
 }
+// The car radio. The game picks the station (MainVM.radio: 0 off; Q, LB or its RADIO button) and says when it may
+// play (radioLive: in a car or the helicopter, in play, sound on); this page plays the stream and tells the game the
+// stations (radioList) and how the tuning goes (radioState). Rock stations with their own public streams (MP3 over
+// https), none from Russia.
+const STATIONS = [
+  ['ROCK ANTENNE', 'ROCK FROM GERMANY', 'https://stream.rockantenne.de/rockantenne/stream/mp3'],
+  ['RADIO PARADISE', 'ROCK MIX FROM CALIFORNIA', 'https://stream.radioparadise.com/rock-192'],
+  ['RADIO ROKS', 'ROCK FROM KYIV', 'https://online.radioroks.ua/RadioROKS'],
+  ['RADIO X CLASSIC', 'CLASSIC ROCK FROM THE UK', 'https://media-ice.musicradio.com/RadioXClassicRockMP3'],
+  ['METAL DETECTOR', 'METAL FROM SOMAFM', 'https://ice2.somafm.com/metal-128-mp3'],
+  ['THE BUZZ', 'ALT ROCK FROM 181.FM', 'https://listen.181fm.com/181-buzz_128k.mp3'],
+];
+const radio = { audio: null, on: 0, want: -1, blocked: false, heard: false, tries: 0, timer: 0 };
+function radioVm() { return r && r.viewModelInstance; }
+function radioSay(state) {
+  const p = radioVm() && radioVm().string('radioState');
+  if (p && p.value !== state) p.value = state;
+}
+function radioSetup() {
+  const vm = radioVm();
+  if (!vm) return;
+  const list = vm.string('radioList');
+  if (list) list.value = STATIONS.map((s) => s[0] + '|' + s[1]).join('\n');
+  let saved = null;
+  try { saved = localStorage.getItem('toytown.radio'); } catch (e) {}
+  const st = vm.number('radio');
+  if (st && saved !== null) st.value = Math.max(0, Math.min(STATIONS.length, parseInt(saved, 10) || 0));
+  setInterval(radioTick, 250);
+}
+// The element, made once. iPhone Safari lets a page start sound only from a tap: the first one (Tap to play) plays
+// a moment of silence on it, after which the page may switch stations on it by itself.
+function radioAudio() {
+  if (radio.audio) return radio.audio;
+  const a = new Audio();
+  a.preload = 'none';
+  a.volume = 0.7;   // under the game's own sounds (ignored on iPhone)
+  a.addEventListener('playing', () => { if (radio.on) { radio.heard = true; radio.tries = 0; radioSay('ON AIR'); } });
+  a.addEventListener('error', () => radioLost());
+  a.addEventListener('ended', () => radioLost());
+  radio.audio = a;
+  return a;
+}
+function radioUnlock() {
+  const a = radioAudio();
+  if (radio.on) return;
+  const n = 400, b = new Uint8Array(44 + n).fill(128), d = new DataView(b.buffer);
+  const tag = (o, t) => { for (let i = 0; i < 4; i++) b[o + i] = t.charCodeAt(i); };
+  tag(0, 'RIFF'); d.setUint32(4, 36 + n, true); tag(8, 'WAVE'); tag(12, 'fmt '); d.setUint32(16, 16, true);
+  d.setUint16(20, 1, true); d.setUint16(22, 1, true); d.setUint32(24, 8000, true); d.setUint32(28, 8000, true);
+  d.setUint16(32, 1, true); d.setUint16(34, 8, true); tag(36, 'data'); d.setUint32(40, n, true);
+  a.src = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+  const p = a.play();
+  if (p && p.then) p.then(() => { if (!radio.on) a.pause(); }).catch(() => {});
+}
+// A station (1..) or off (0): a live stream is joined afresh each time (resuming would replay a stale buffer).
+function radioTune(k) {
+  const a = radioAudio();
+  radio.on = k;
+  clearTimeout(radio.timer);
+  if (!k) { a.pause(); a.removeAttribute('src'); a.load(); radioSay(''); return; }
+  radio.heard = false;
+  a.src = STATIONS[k - 1][2];
+  radioSay('TUNING');
+  const p = a.play();
+  if (p && p.then) p.then(() => { radio.blocked = false; }).catch((e) => {
+    if (e && e.name === 'NotAllowedError') radio.blocked = true;   // retried on the next tap or key
+    else radioLost();
+  });
+  radio.timer = setTimeout(() => { if (radio.on === k && !radio.heard) radioLost(); }, 12000);
+}
+// The stream failed or dropped: rejoin a couple of times, then NO SIGNAL (the game shows it).
+function radioLost() {
+  const k = radio.on;
+  if (!k) return;
+  if (radio.tries < 2) { radio.tries++; setTimeout(() => { if (radio.on === k) radioTune(k); }, 2000); return; }
+  radio.audio.pause();
+  radioSay('NO SIGNAL');
+}
+function radioTick() {
+  const vm = radioVm();
+  if (!vm) return;
+  const st = vm.number('radio'), lv = vm.boolean('radioLive');
+  const want = st ? Math.round(st.value) : 0;
+  if (want !== radio.want) {
+    radio.want = want;
+    radio.tries = 0;
+    try { localStorage.setItem('toytown.radio', String(want)); } catch (e) {}
+  }
+  const live = started && !document.hidden && !!(lv && lv.value) && want >= 1 && want <= STATIONS.length;
+  const k = live ? want : 0;
+  if (k !== radio.on) radioTune(k);
+}
+function radioRetry() { if (radio.blocked && radio.on) { radio.blocked = false; radioTune(radio.on); } }
+document.addEventListener('visibilitychange', radioTick);
+
 // Play: the click / tap also lets the browser start the sound.
 function play() {
+  radioUnlock();
   started = true;
   stage.classList.add('playing');
   canvas.focus();
@@ -178,7 +275,9 @@ canvas.addEventListener('blur', () => { if (!touchMode) stage.classList.remove('
 canvas.addEventListener('focus', () => { if (started) stage.classList.add('playing'); });
 canvas.addEventListener('keydown', (e) => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+  radioRetry();
 });
+canvas.addEventListener('pointerup', radioRetry);
 // a touch on a laptop with a touch screen turns the touch controls on
 canvas.addEventListener('touchstart', () => { if (!touchMode && !query.has('touch')) setTouch(true); }, { passive: true });
 // no page zoom, selection or long-press menu over the game
