@@ -56,9 +56,9 @@
       <p class="homescreen">Full screen on iPhone: tap Share, then <b>Add to Home Screen</b>, and open Toy Town from
         there (Safari doesn't let a page go full screen).</p>
       <div class="controls">
-        <div class="touch-only"><b>Touch</b>left stick: steer, push up for gas, down to brake (on foot: walk) &middot;
-          right stick: look around &middot; the buttons beside it change with what you do &middot;
-          <b style="display:inline">II</b> pauses &middot; swipe to pick a character</div>
+        <div class="touch-only"><b>Touch</b>the stick (bottom left, where your thumb lands): steer, push up for gas,
+          down to brake (on foot: walk) &middot; drag the view to look around &middot; the buttons in the corner change
+          with what you do &middot; <b style="display:inline">II</b> pauses &middot; swipe to pick a character</div>
         <div class="desk-only"><b>Keyboard</b><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive or walk &middot; <kbd>Space</kbd> handbrake / jump &middot;
           <kbd>Shift</kbd> run &middot; <kbd>E</kbd> get out / take any car &middot; <kbd>R</kbd> unstuck &middot; <kbd>Esc</kbd> pause menu</div>
         <div class="desk-only"><b>Mouse</b>move to look around (it swings back after a moment); click the menus</div>
@@ -94,31 +94,38 @@ function layoutFor() {
 }
 const dpr = () => Math.min(window.devicePixelRatio || 1, touchMode ? 2 : 3);   // phones: 2x is plenty
 
-const r = new rive.Rive({
-  src: 'toytown.riv?v=5',
-  canvas,
-  artboard: 'Main',
-  stateMachine: 'Main',
-  autoplay: true,
-  autoBind: true,
-  enableGPUCanvas: true,    // the 3D town is drawn on the GPU canvas (Rive's own share links don't turn it on)
-  enableMultiTouch: true,   // a thumb on the stick and one on the pedals
-  layout: layoutFor(),
-  onLoad: () => {
-    loaded = true;
-    fit();
-    setTouch(touchMode);
-    $('play').disabled = false;
-    $('play').textContent = touchMode ? 'Tap to play' : 'Click to play';
-  },
-  onLoadError: (e) => { $('status').textContent = 'Could not load the game: ' + e; },
-});
-window.rivePlayer = r;
+// The build to load: version.txt is fetched past every cache, so an installed app (Add to Home Screen) or a
+// cached page still gets a new build on its next launch.
+let r = null;
+function createPlayer(ver) {
+  r = new rive.Rive({
+    src: 'toytown.riv?v=' + ver,
+    canvas,
+    artboard: 'Main',
+    stateMachine: 'Main',
+    autoplay: true,
+    autoBind: true,
+    enableGPUCanvas: true,    // the 3D town is drawn on the GPU canvas (Rive's own share links don't turn it on)
+    enableMultiTouch: true,   // a thumb on the stick, another on a button or the view
+    layout: layoutFor(),
+    onLoad: () => {
+      loaded = true;
+      fit();
+      setTouch(touchMode);
+      $('play').disabled = false;
+      $('play').textContent = touchMode ? 'Tap to play' : 'Click to play';
+    },
+    onLoadError: (e) => { $('status').textContent = 'Could not load the game: ' + e; },
+  });
+  window.rivePlayer = r;
+}
+fetch('version.txt', { cache: 'no-store' }).then((x) => (x.ok ? x.text() : '')).catch(() => '')
+  .then((v) => createPlayer((v || '').trim() || String(Date.now())));
 
 function setTouch(on) {
   touchMode = on;
   document.body.classList.toggle('touch', on);
-  const vm = r.viewModelInstance;
+  const vm = r && r.viewModelInstance;
   const p = vm && vm.boolean('touch');
   if (p) p.value = on;
 }
@@ -127,6 +134,7 @@ let fitQueued = false;
 let listenScale = 0;
 function fit() {
   fitQueued = false;
+  if (!r) return;
   const lay = layoutFor();
   r.layout = lay;
   r.resizeDrawingSurfaceToCanvas(dpr());
